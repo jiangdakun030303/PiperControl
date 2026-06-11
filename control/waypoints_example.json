@@ -1,0 +1,14 @@
+{
+    "waypoints": [
+        {"type": "home", "speed": 30},
+        {"type": "gripper", "width": 50.0, "label": "张开夹爪"},
+        {"type": "joint", "joints": [20, 15, -10, 5, 0, 0], "speed": 30, "label": "关节位姿A"},
+        {"type": "pose", "x": 300, "y": -50, "z": 350, "speed": 30, "label": "笛卡尔点B"},
+        {"type": "pose", "x": 300, "y": -50, "z": 150, "move_type": "l", "speed": 20, "label": "直线下降"},
+        {"type": "gripper", "width": 5.0, "label": "抓取"},
+        {"type": "pose", "x": 300, "y": 50, "z": 150, "move_type": "l", "speed": 20, "label": "平移"},
+        {"type": "pose", "x": 300, "y": 50, "z": 350, "speed": 30, "label": "抬升"},
+        {"type": "gripper", "width": 50.0, "label": "释放"},
+        {"type": "home", "speed": 30}
+    ]
+}
