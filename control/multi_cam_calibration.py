@@ -24,15 +24,15 @@ Usage
   # First: calibrate cam1
   python multi_cam_calibration.py \
       --load-hand-eye calibration_data/hand_eye_result.npz \
-      --load-cam0 /path/to/cam0_calibration.yaml \
-      --load-cam /path/to/cam1_calibration.yaml \
+      --load-cam0 ./config/cam0_calibration.yaml \
+      --load-cam ./config/cam1_calibration.yaml \
       --cam-id 1
 
   # Then: calibrate cam2 (run separately)
   python multi_cam_calibration.py \
       --load-hand-eye calibration_data/hand_eye_result.npz \
-      --load-cam0 /path/to/cam0_calibration.yaml \
-      --load-cam /path/to/cam2_calibration.yaml \
+      --load-cam0 ./config/cam0_calibration.yaml \
+      --load-cam ./config/cam2_calibration.yaml \
       --cam-id 2
 
 Requirements: pip install opencv-python numpy
@@ -676,8 +676,8 @@ def main():
                         help="external camera intrinsics (.yaml)")
     parser.add_argument("--cam-id", type=int, required=True, choices=[1, 2],
                         help="external camera ID (1 or 2)")
-    parser.add_argument("--cam0-dev", type=int, default=0, help="cam0 device id")
-    parser.add_argument("--cam-dev", type=int, default=2, help="external camera device id")
+    parser.add_argument("--cam0-dev", type=int, default=4, help="cam0 device id")
+    parser.add_argument("--cam-dev", type=int, default=3, help="external camera device id")
     parser.add_argument("--cols", type=int, default=10)
     parser.add_argument("--rows", type=int, default=7)
     parser.add_argument("--square-size", type=float, default=0.025)

@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""机械臂定点控制脚本 —— 按预设路径点依次运动，等待到达后继续。"""
+"""机械臂定点控制脚本 —— 按预设路径点依次运动，等待到达后继续。
+
+用法:
+  python waypoint_control.py --demo                              # 内置演示序列
+  python waypoint_control.py --pick-place                        # pick-and-place 示例
+  python waypoint_control.py -w my_pts.json                      # 从 JSON 文件加载路径点
+  python waypoint_control.py --demo --loop 3 --dwell 0.5         # 循环 3 次, 每步停 0.5s
+  python waypoint_control.py --demo --no-home                    # 跳过初始 HOME
+  python waypoint_control.py --demo --hold                       # 完成后保持连接
+  python waypoint_control.py --demo --can can0 --speed 30        # 指定 CAN 端口
+"""
 
 import time
 import sys

@@ -33,6 +33,7 @@ class TrajectoryStepper:
         self.can_name = can_name
         self.piper = None
         self._poses = None
+        self._last_cmd = None
 
     def connect(self):
         self.piper = C_PiperInterface_V2(self.can_name)
@@ -55,6 +56,12 @@ class TrajectoryStepper:
         return (ep.X_axis / self.M2POSE, ep.Y_axis / self.M2POSE, ep.Z_axis / self.M2POSE,
                 ep.RX_axis / self.DEG2POSE, ep.RY_axis / self.DEG2POSE, ep.RZ_axis / self.DEG2POSE)
 
+    def _read_joints_deg(self):
+        j = self.piper.GetArmJointMsgs().joint_state
+        return [v / 1000.0 for v in
+                [j.joint_1, j.joint_2, j.joint_3,
+                 j.joint_4, j.joint_5, j.joint_6]]
+
     def _read_status(self):
         return self.piper.GetArmStatus().arm_status
 
@@ -63,6 +70,21 @@ class TrajectoryStepper:
 
     def arm_status(self):
         return self._read_status().arm_status
+
+    def print_state(self, prefix: str = ""):
+        """打印当前机械臂状态。"""
+        x, y, z, rx, ry, rz = self._read_pose()
+        st = self._read_status()
+        joints = self._read_joints_deg()
+        sys.stdout.write(
+            f"\r\n{prefix}"
+            f"末端: ({x:.4f}, {y:.4f}, {z:.4f})m  "
+            f"RX={rx:.1f}° RY={ry:.1f}° RZ={rz:.1f}°\n"
+            f"关节: [{', '.join(f'{v:.1f}°' for v in joints)}]\n"
+            f"状态: motion={st.motion_status.name}({st.motion_status.value}) "
+            f"arm={st.arm_status.name}({st.arm_status.value})\n"
+        )
+        sys.stdout.flush()
 
     def load_trajectory(self, filepath: str):
         data = np.load(filepath, allow_pickle=True)
@@ -81,16 +103,17 @@ class TrajectoryStepper:
         *_, rx, ry, rz = self._read_pose()
         self.piper.MotionCtrl_2(ctrl_mode=0x01, move_mode=0x00,
                                 move_spd_rate_ctrl=speed, is_mit_mode=0x00)
-        self.piper.EndPoseCtrl(
-            int(x_m * self.M2POSE), int(y_m * self.M2POSE), int(z_m * self.M2POSE),
-            int(rx * self.DEG2POSE), int(ry * self.DEG2POSE), int(rz * self.DEG2POSE),
-        )
+        cmd = (int(x_m * self.M2POSE), int(y_m * self.M2POSE), int(z_m * self.M2POSE),
+               int(rx * self.DEG2POSE), int(ry * self.DEG2POSE), int(rz * self.DEG2POSE))
+        self.piper.EndPoseCtrl(*cmd)
+        self._last_cmd = cmd  # 保存指令用于重发
 
     # ------- 到达等待 -------
 
     def wait_arrival(self, timeout: float = 60.0) -> bool:
         t0 = time.time()
         last_print = 0.0
+        last_resend = 0.0
         while time.time() - t0 < timeout:
             ms = self.motion_status()
             arm_st = self.arm_status()
@@ -99,10 +122,14 @@ class TrajectoryStepper:
             now = time.time()
             if now - last_print > 1.0:
                 x, y, z, _, _, _ = self._read_pose()
-                sys.stdout.write(f"\r\033[K  ... 运动中 motion={ms.name}  "
+                sys.stdout.write(f"\r\033[K  ... 运动中 motion={ms.name}({ms.value})  "
                                  f"当前: ({x:.4f}, {y:.4f}, {z:.4f})m\n")
                 sys.stdout.flush()
                 last_print = now
+            # 每隔 0.5s 重发 EndPoseCtrl，确保指令被接收
+            if now - last_resend > 0.5 and self._last_cmd is not None:
+                self.piper.EndPoseCtrl(*self._last_cmd)
+                last_resend = now
             if arm_st in (0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07):
                 sys.stdout.write(f"\r\033[K  [错误] 臂状态: {arm_st.name}\n")
                 sys.stdout.flush()
@@ -204,10 +231,21 @@ def main():
                     continue
                 p = ctrl._poses[idx]
                 sys.stdout.write(f"\r\n\033[K→ [{idx}/{total-1}] "
-                                 f"({p[0]:.4f}, {p[1]:.4f}, {p[2]:.4f})m\n")
+                                 f"目标: ({p[0]:.4f}, {p[1]:.4f}, {p[2]:.4f})m\n")
                 sys.stdout.flush()
                 ctrl.move_to_point(p[0], p[1], p[2], args.speed)
-                if ctrl.wait_arrival(args.timeout):
+                ok = ctrl.wait_arrival(args.timeout)
+                # 打印指令参数和机械臂状态
+                cmd = ctrl._last_cmd
+                if cmd:
+                    sys.stdout.write(
+                        f"  指令: EndPoseCtrl(X={cmd[0]}, Y={cmd[1]}, Z={cmd[2]}, "
+                        f"RX={cmd[3]}, RY={cmd[4]}, RZ={cmd[5]})\n"
+                    )
+                sys.stdout.write(f"  结果: {'到达' if ok else '失败/超时'}\n")
+                sys.stdout.flush()
+                ctrl.print_state()
+                if ok:
                     idx += 1
                 if idx < total:
                     nxt = ctrl._poses[idx]
@@ -225,17 +263,24 @@ def main():
                 idx -= 2  # 回到上一个已到达的点
                 p = ctrl._poses[idx]
                 sys.stdout.write(f"\r\n\033[K← [{idx}/{total-1}] "
-                                 f"({p[0]:.4f}, {p[1]:.4f}, {p[2]:.4f})m\n")
+                                 f"目标: ({p[0]:.4f}, {p[1]:.4f}, {p[2]:.4f})m\n")
                 sys.stdout.flush()
                 ctrl.move_to_point(p[0], p[1], p[2], args.speed)
                 ctrl.wait_arrival(args.timeout)
                 idx += 1
+                cmd = ctrl._last_cmd
+                if cmd:
+                    sys.stdout.write(
+                        f"  指令: EndPoseCtrl(X={cmd[0]}, Y={cmd[1]}, Z={cmd[2]}, "
+                        f"RX={cmd[3]}, RY={cmd[4]}, RZ={cmd[5]})\n"
+                    )
+                sys.stdout.flush()
+                ctrl.print_state()
                 sys.stdout.write(f"\r\033[K下一个 [{idx}/{total-1}]: "
                                  f"({ctrl._poses[idx][0]:.4f}, {ctrl._poses[idx][1]:.4f}, {ctrl._poses[idx][2]:.4f})m\n")
                 sys.stdout.flush()
 
             elif ch == 'j':
-                # 临时退出 raw 模式读数字
                 termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
                 try:
                     num_str = input("\r\n\033[K跳转到序号 (0~{0}): ".format(total - 1))
@@ -247,20 +292,19 @@ def main():
                     ctrl.move_to_point(p[0], p[1], p[2], args.speed)
                     ctrl.wait_arrival(args.timeout)
                     idx += 1
+                    cmd = ctrl._last_cmd
+                    if cmd:
+                        print(f"  指令: EndPoseCtrl(X={cmd[0]}, Y={cmd[1]}, Z={cmd[2]}, "
+                              f"RX={cmd[3]}, RY={cmd[4]}, RZ={cmd[5]})")
+                    x, y, z, _, _, _ = ctrl._read_pose()
+                    print(f"  当前: ({x:.4f}, {y:.4f}, {z:.4f})m")
                 except (ValueError, EOFError):
                     print("无效序号")
                 finally:
                     tty.setraw(fd)
 
             elif ch == 's':
-                x, y, z, rx, ry, rz = ctrl._read_pose()
-                st = ctrl._read_status()
-                sys.stdout.write(
-                    f"\r\n\033[K状态: motion={st.motion_status.name} arm={st.arm_status.name}\n"
-                    f"末端: ({x:.4f}, {y:.4f}, {z:.4f})m  "
-                    f"RX={rx:.1f}° RY={ry:.1f}° RZ={rz:.1f}°\n"
-                )
-                sys.stdout.flush()
+                ctrl.print_state()
 
             elif ch == 'r':
                 sys.stdout.write("\r\n\033[K[复位]\n")
